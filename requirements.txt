@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+google-cloud-bigquery
+passlib[bcrypt]
+pandas-gbq
