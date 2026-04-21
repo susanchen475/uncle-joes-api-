@@ -23,8 +23,8 @@ client = bigquery.Client()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Set your BigQuery IDs here
-PROJECT_ID = "your-project-id"
-DATASET_ID = "your_dataset_name"
+PROJECT_ID = "uncle-joes-coffee-club"
+DATASET_ID = "uncle_joes"
 
 # 2. Pydantic Models for Response Validation
 class LoginRequest(BaseModel):
@@ -43,12 +43,32 @@ def run_query(query: str, job_config=None):
 
 @app.get("/menu")
 def get_menu():
-    query = f"SELECT * FROM `{PROJECT_ID}.{DATASET_ID}.menu`"
+    # Matches Image 1 schema
+    query = f"SELECT * FROM `{PROJECT_ID}.{DATASET_ID}.menu_items`"
+    return run_query(query)
+
+@app.get("/menu/search")
+def search_menu(item_name: str):
+    # TRIM(name) ensures that accidental spaces in BigQuery don't break the search
+    query = f"""
+        SELECT * FROM `{PROJECT_ID}.{DATASET_ID}.menu_items` 
+        WHERE LOWER(TRIM(name)) LIKE @name
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("name", "STRING", f"%{item_name.lower()}%")]
+    )
+    return run_query(query, job_config)
+
+@app.get("/menu/categories")
+def get_menu_categories():
+    # Returns a unique list of categories for the navigation UI
+    query = f"SELECT DISTINCT category FROM `{PROJECT_ID}.{DATASET_ID}.menu_items` ORDER BY category"
     return run_query(query)
 
 @app.get("/menu/{item_id}")
 def get_menu_item(item_id: str):
-    query = f"SELECT * FROM `{PROJECT_ID}.{DATASET_ID}.menu` WHERE id = @item_id"
+    # Matches Image 1: 'id' is a STRING
+    query = f"SELECT * FROM `{PROJECT_ID}.{DATASET_ID}.menu_items` WHERE id = @item_id"
     job_config = bigquery.QueryJobConfig(
         query_parameters=[bigquery.ScalarQueryParameter("item_id", "STRING", item_id)]
     )
@@ -56,6 +76,20 @@ def get_menu_item(item_id: str):
     if not results:
         raise HTTPException(status_code=404, detail="Item not found")
     return results[0]
+
+
+
+@app.get("/menu/search")
+def search_menu(item_name: str):
+    # TRIM(name) ensures that accidental spaces in BigQuery don't break the search
+    query = f"""
+        SELECT * FROM `{PROJECT_ID}.{DATASET_ID}.menu_items` 
+        WHERE LOWER(TRIM(name)) LIKE @name
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("name", "STRING", f"%{item_name.lower()}%")]
+    )
+    return run_query(query, job_config)
 
 @app.get("/locations")
 def get_locations():
@@ -73,8 +107,18 @@ def get_location(location_id: str):
         raise HTTPException(status_code=404, detail="Location not found")
     return results[0]
 
+@app.get("/locations/filter/{state}")
+def get_locations_by_state(state: str):
+    # Matches Image 4: Field name is 'state'
+    query = f"SELECT * FROM `{PROJECT_ID}.{DATASET_ID}.locations` WHERE state = @state"
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[bigquery.ScalarQueryParameter("state", "STRING", state.upper())]
+    )
+    return run_query(query, job_config)
+
 @app.post("/login")
 def login(auth: LoginRequest):
+    # Now using the clean 'email' and 'password' columns
     query = f"SELECT email, password FROM `{PROJECT_ID}.{DATASET_ID}.members` WHERE email = @email"
     job_config = bigquery.QueryJobConfig(
         query_parameters=[bigquery.ScalarQueryParameter("email", "STRING", auth.email)]
@@ -88,7 +132,6 @@ def login(auth: LoginRequest):
 
 @app.get("/members/{member_id}/orders")
 def get_member_orders(member_id: str):
-    # This query joins the orders and order_items for a comprehensive history
     query = f"""
         SELECT o.order_id, o.order_date, o.order_total, i.item_name, i.quantity, i.price
         FROM `{PROJECT_ID}.{DATASET_ID}.orders` o
@@ -103,7 +146,7 @@ def get_member_orders(member_id: str):
 
 @app.get("/members/{member_id}/points")
 def get_member_points(member_id: str):
-    # Logic: $1 = 1pt. We sum the order_total.
+    # This now joins orders to the members table using your new 'id' column
     query = f"""
         SELECT SUM(order_total) as total_spent 
         FROM `{PROJECT_ID}.{DATASET_ID}.orders` 
@@ -114,7 +157,6 @@ def get_member_points(member_id: str):
     )
     results = run_query(query, job_config)
     
-    # Handle case where user has no orders
     points = int(results[0]['total_spent'] or 0)
     return {"member_id": member_id, "loyalty_points": points}
 
